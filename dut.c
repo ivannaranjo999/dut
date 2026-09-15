@@ -3,6 +3,7 @@
 #include <pthread.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/syscall.h>
 #include <stdlib.h>
 #include <string.h>
 #include <dirent.h>
@@ -97,7 +98,11 @@ void* worker_main(void* param){
         snprintf(size_str, sizeof(size_str), "%.2f%s", human_size, units[unit]);
       }
 
+#ifdef DUT_DEBUG
+      printf("%-10s %-40s %d\n", size_str, wp->paths[i], (int)syscall(SYS_gettid));
+#else
       printf("%-10s %s\n", size_str, wp->paths[i]);
+#endif
     }
   }
 
