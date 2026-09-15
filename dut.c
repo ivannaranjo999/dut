@@ -76,7 +76,7 @@ long get_size(const char *path){
 
 void* worker_main(void* param){
   struct worker_params *wp = (struct worker_params*)param;
-  const char *units[] = {"KB", "MB", "GB", "TB", "PB"};
+  const char *units[] = {"K", "M", "G", "T", "P"};
 
   for (int i = 0; i < wp->count; ++i){
     long kb_size = get_size(wp->paths[i]);
