@@ -33,6 +33,7 @@ long get_file_size(const char *path){
   struct stat st;
 
   if (stat(path, &st) != 0){
+    fprintf(stderr, "Cannot get size of %s\n", path);
     return -1;
   }
 
@@ -87,15 +88,17 @@ void* worker_main(void* param){
       unit++;
     }
 
-    char size_str[32];
 
-    if (human_size == (long)human_size){
-      snprintf(size_str, sizeof(size_str), "%ld%s", (long)human_size, units[unit]);
-    } else {
-      snprintf(size_str, sizeof(size_str), "%.2f%s", human_size, units[unit]);
+    if (human_size > 0){
+      char size_str[32];
+      if (human_size == (long)human_size){
+        snprintf(size_str, sizeof(size_str), "%ld%s", (long)human_size, units[unit]);
+      } else {
+        snprintf(size_str, sizeof(size_str), "%.2f%s", human_size, units[unit]);
+      }
+
+      printf("%-10s %s\n", size_str, wp->paths[i]);
     }
-
-    printf("%-10s %s\n", size_str, wp->paths[i]);
   }
 
   /* For malloc in main process */
@@ -106,6 +109,26 @@ void* worker_main(void* param){
 int main(int argc, char *argv[]){
   long n_cores = sysconf(_SC_NPROCESSORS_ONLN);
   int n_dirs = argc - 1;
+  char **stdin_paths = NULL;
+
+  if (argc == 1) {
+    int capacity = 16;
+    int count = 0;
+    stdin_paths = malloc(capacity * sizeof(char*));
+    char buf[PATH_MAX];
+
+    while (scanf("%1023s", buf) == 1) {
+      if (count == capacity) {
+        capacity *= 2;
+        stdin_paths = realloc(stdin_paths, capacity * sizeof(char*));
+      }
+      stdin_paths[count++] = strdup(buf);
+    }
+
+    n_dirs = count;
+  } else {
+    n_dirs = argc - 1;
+  }
 
   int per_thread=(n_dirs + n_cores - 1) / n_cores;
   char *paths[n_cores][per_thread];
@@ -115,7 +138,7 @@ int main(int argc, char *argv[]){
   for(int idx = 0; idx < n_dirs; ++idx){
     int target_thread = idx % n_cores; 
     int pos = counts[target_thread]++;
-    paths[target_thread][pos] = argv[idx + 1];
+    paths[target_thread][pos] = (argc == 1) ? stdin_paths[idx] : argv[idx + 1];
   }
 
   pthread_t threads[n_cores];
@@ -130,6 +153,13 @@ int main(int argc, char *argv[]){
 
   for(int t = 0; t < n_cores; ++t){
     pthread_join(threads[t], NULL);
+  }
+
+  if (argc == 1) {
+    for (int i = 0; i < n_dirs; ++i) {
+      free(stdin_paths[i]);
+    }
+    free(stdin_paths);
   }
 
   return 0;
