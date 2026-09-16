@@ -17,4 +17,7 @@ $(TARGET): $(OBJS)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 clean:
+	rm -f $(OBJS)
+
+veryclean:
 	rm -f $(OBJS) $(TARGET)
