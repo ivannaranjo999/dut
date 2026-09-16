@@ -8,6 +8,7 @@
 #include <string.h>
 #include <dirent.h>
 #include <limits.h>
+#include <stdatomic.h>
 
 #define INITIAL_STACK_SIZE 256
 #define WORKER_YIELD 1000
@@ -21,6 +22,7 @@ struct stack_entry *stack = NULL;
 int stack_curr_size = 0;
 int stack_capacity = 0;
 pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t progress_cond = PTHREAD_COND_INITIALIZER;
 
 /* array for size of each argument */
 long *total_per_argument;
@@ -29,6 +31,9 @@ long active_workers = 0;
 
 /* number of cores */
 long n_cores;
+
+_Atomic long files_done = 0;
+_Atomic int work_finished = 0;
 
 int push_stack(struct stack_entry entry){
   pthread_mutex_lock(&mutex);
@@ -163,6 +168,7 @@ void* worker_main(void * param){
     if (ret == 0){
       total_per_argument[entry.index] += get_size(entry);
       free(entry.path);
+      atomic_fetch_add(&files_done, 1);
       finish_work();
     } else {
       if (should_exit()){
@@ -171,6 +177,30 @@ void* worker_main(void * param){
       usleep(WORKER_YIELD);
     }
   }
+  return NULL;
+}
+
+void* progress_main(void *param){
+  if (!isatty(fileno(stderr))){
+    return NULL;
+  }
+  pthread_mutex_lock(&mutex);
+  while (!work_finished){
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    ts.tv_sec += 1;
+
+    /* Release mutex and sleep until 1 second or progress_cond */
+    pthread_cond_timedwait(&progress_cond, &mutex, &ts);
+
+    if (!work_finished){
+      fprintf(stderr, "\r%ld files analyzed...", files_done);
+      fflush(stderr);
+    }
+  }
+  pthread_mutex_unlock(&mutex);
+  fprintf(stderr, "\r");
+  fflush(stderr);
   return NULL;
 }
 
@@ -213,6 +243,7 @@ int main(int argc, char *argv[]){
   }
 
   pthread_t threads[n_cores];
+  pthread_t progress_thread;
   int *thread_ids = malloc(n_cores * sizeof(int));
 
   for(int t = 0; t < n_cores; ++t){
@@ -220,10 +251,18 @@ int main(int argc, char *argv[]){
     pthread_create(&threads[t], NULL, worker_main, &thread_ids[t]);
   }
 
+  pthread_create(&progress_thread, NULL, progress_main, NULL);
+
   for(int t = 0; t < n_cores; ++t){
     pthread_join(threads[t], NULL);
   }
-  
+
+  pthread_mutex_lock(&mutex);
+  work_finished = 1;
+  pthread_cond_signal(&progress_cond);
+  pthread_mutex_unlock(&mutex);
+  pthread_join(progress_thread, NULL);
+
   for(int idx = 0; idx < n_dirs; ++idx){
     char size_str[32];
     format_size(total_per_argument[idx], size_str, sizeof(size_str));
