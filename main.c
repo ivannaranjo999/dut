@@ -4,11 +4,13 @@
 #include <stdlib.h>
 #include <string.h>
 #include <limits.h>
+#include <time.h>
 #include "stack.h"
 #include "size.h"
 #include "worker.h"
 #include "progress.h"
 #include "args.h"
+#include "delta.h"
 
 int main(int argc, char *argv[]){
   long n_cores = sysconf(_SC_NPROCESSORS_ONLN);
@@ -40,10 +42,16 @@ int main(int argc, char *argv[]){
   progress_signal_done();
   pthread_join(progress_thread, NULL);
 
+  time_t ts = time(NULL);
+
   for (int idx = 0; idx < given_paths_size; ++idx){
     char size_str[32];
     format_size(total_per_argument[idx], size_str, sizeof(size_str));
     printf("%-10s %s\n", size_str, given_paths[idx]);
+
+    if(is_delta){
+      write_delta_file(idx, ts);
+    }
 
     free(given_paths[idx]);
   }
