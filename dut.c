@@ -9,10 +9,84 @@
 #include <dirent.h>
 #include <limits.h>
 
-struct worker_params {
-  int count;
-  char **paths; 
+#define INITIAL_STACK_SIZE 256
+#define WORKER_YIELD 1000
+
+/* Stack info */
+struct stack_entry {
+  char *path;
+  int index;
 };
+struct stack_entry *stack = NULL;
+int stack_curr_size = 0;
+int stack_capacity = 0;
+pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+
+/* array for size of each argument */
+long *total_per_argument;
+/* array for working thread or not */
+long active_workers = 0;
+
+/* number of cores */
+long n_cores;
+
+int push_stack(struct stack_entry entry){
+  pthread_mutex_lock(&mutex);
+  if(stack_curr_size == stack_capacity){
+    stack_capacity = (stack_capacity == 0) ? INITIAL_STACK_SIZE : stack_capacity * 2;
+    stack = realloc(stack, stack_capacity * sizeof(struct stack_entry));
+  }
+  stack[stack_curr_size++] = entry;
+  pthread_mutex_unlock(&mutex);
+  return 0;
+}
+
+int pop_stack(struct stack_entry * output){
+  int ret;
+  pthread_mutex_lock(&mutex);
+  if(stack_curr_size > 0){
+    int top = stack_curr_size - 1;
+    *output = stack[top];
+    stack_curr_size--;
+    active_workers++;
+    ret = 0;
+  } else {
+    ret = -1;
+  }
+  pthread_mutex_unlock(&mutex);
+  return ret;
+}
+
+void finish_work(void){
+  pthread_mutex_lock(&mutex);
+  active_workers--;
+  pthread_mutex_unlock(&mutex);
+}
+
+int should_exit(void){
+  int result;
+  pthread_mutex_lock(&mutex);
+  result = (stack_curr_size == 0 && active_workers == 0);
+  pthread_mutex_unlock(&mutex);
+  return result;
+}
+
+void format_size(long kb_size, char *out, size_t out_size){
+  const char *units[] = {"K", "M", "G", "T", "P"};
+  double human_size = (double)kb_size;
+  int unit = 0;
+
+  while (human_size >= 1024 && unit < 4){
+    human_size /= 1024;
+    unit++;
+  }
+
+  if (human_size == (long)human_size){
+    snprintf(out, out_size, "%ld%s", (long)human_size, units[unit]);
+  } else {
+    snprintf(out, out_size, "%.2f%s", human_size, units[unit]);
+  }
+}
 
 int is_regular_file(const char *path){
   struct stat path_stat;
@@ -41,78 +115,67 @@ long get_file_size(const char *path){
   return st.st_blocks / 2; // 1 KB
 }
 
-long get_size(const char *path){
-  if (is_regular_file(path)) {
+long get_size(struct stack_entry entry){
+  if (is_regular_file(entry.path)) {
     /* Is file */
-    return get_file_size(path);
-  } else if(is_dir(path)){ 
+    return get_file_size(entry.path);
+  } else if(is_dir(entry.path)){ 
     /* Is dir */
-    DIR *dir = opendir(path);
+    DIR *dir = opendir(entry.path);
     if (dir == NULL){
-      fprintf(stderr, "Failed to open dir %s\n", path);
+      fprintf(stderr, "Failed to open dir %s\n", entry.path);
       return 0;
     }
 
     long total = 0;
-    struct dirent *entry;
+    struct dirent *dir_entry;
 
-    while ((entry = readdir(dir)) != NULL) {
-      if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
+    while ((dir_entry = readdir(dir)) != NULL) {
+      if (strcmp(dir_entry->d_name, ".") == 0 || strcmp(dir_entry->d_name, "..") == 0) {
         continue;
       }
 
       char child_path[PATH_MAX];
-      snprintf(child_path, sizeof(child_path), "%s/%s", path, entry->d_name);
+      snprintf(child_path, sizeof(child_path), "%s/%s", entry.path, dir_entry->d_name);
 
-      total += get_size(child_path);
+      struct stack_entry to_push;
+      to_push.index = entry.index;
+      to_push.path = strdup(child_path);
+
+      push_stack(to_push);
     }
 
     closedir(dir);
-    return total;
+    return 0;
   } else { 
     /* Is something else */
-    fprintf(stderr, "%s's type not supported\n", path);
+    fprintf(stderr, "%s's type not supported\n", entry.path);
     return 0; 
   }
 }
 
-void* worker_main(void* param){
-  struct worker_params *wp = (struct worker_params*)param;
-  const char *units[] = {"K", "M", "G", "T", "P"};
-
-  for (int i = 0; i < wp->count; ++i){
-    long kb_size = get_size(wp->paths[i]);
-    double human_size = (double)kb_size;
-    int unit = 0; 
-    while (human_size >= 1024 && unit < 4){
-      human_size /= 1024; 
-      unit++;
-    }
-
-
-    if (human_size > 0){
-      char size_str[32];
-      if (human_size == (long)human_size){
-        snprintf(size_str, sizeof(size_str), "%ld%s", (long)human_size, units[unit]);
-      } else {
-        snprintf(size_str, sizeof(size_str), "%.2f%s", human_size, units[unit]);
+void* worker_main(void * param){
+  int ret;
+  int thread_id = *(int*) param;
+  struct stack_entry entry;
+  for(;;){
+    ret = pop_stack(&entry);
+    if (ret == 0){
+      total_per_argument[entry.index] += get_size(entry);
+      free(entry.path);
+      finish_work();
+    } else {
+      if (should_exit()){
+        break;
       }
-
-#ifdef DUT_DEBUG
-      printf("%-10s %-40s %d\n", size_str, wp->paths[i], (int)syscall(SYS_gettid));
-#else
-      printf("%-10s %s\n", size_str, wp->paths[i]);
-#endif
+      usleep(WORKER_YIELD);
     }
   }
-
-  /* For malloc in main process */
-  free(wp);
   return NULL;
 }
 
 int main(int argc, char *argv[]){
-  long n_cores = sysconf(_SC_NPROCESSORS_ONLN);
+  n_cores = sysconf(_SC_NPROCESSORS_ONLN);
   int n_dirs = argc - 1;
   char **stdin_paths = NULL;
 
@@ -135,29 +198,41 @@ int main(int argc, char *argv[]){
     n_dirs = argc - 1;
   }
 
-  int per_thread=(n_dirs + n_cores - 1) / n_cores;
-  char *paths[n_cores][per_thread];
-  int counts[n_cores];
-  memset(counts, 0, sizeof(counts));
+  total_per_argument = calloc(n_dirs, sizeof(long));
 
   for(int idx = 0; idx < n_dirs; ++idx){
-    int target_thread = idx % n_cores; 
-    int pos = counts[target_thread]++;
-    paths[target_thread][pos] = (argc == 1) ? stdin_paths[idx] : argv[idx + 1];
+    struct stack_entry entry;
+    entry.index=idx;
+    if (argc == 1){
+      entry.path=strdup(stdin_paths[idx]);
+      push_stack(entry);
+    } else {
+      entry.path=strdup(argv[idx+1]);
+      push_stack(entry);
+    }
   }
 
   pthread_t threads[n_cores];
+  int *thread_ids = malloc(n_cores * sizeof(int));
 
   for(int t = 0; t < n_cores; ++t){
-    struct worker_params *wp = malloc(sizeof(struct worker_params));
-    wp->count = counts[t];
-    wp->paths = paths[t];
-
-    pthread_create(&threads[t], NULL, worker_main, wp);
+    thread_ids[t] = t;
+    pthread_create(&threads[t], NULL, worker_main, &thread_ids[t]);
   }
 
   for(int t = 0; t < n_cores; ++t){
     pthread_join(threads[t], NULL);
+  }
+  
+  for(int idx = 0; idx < n_dirs; ++idx){
+    char size_str[32];
+    format_size(total_per_argument[idx], size_str, sizeof(size_str));
+
+    if (argc == 1){
+      printf("%-10s %s\n", size_str, stdin_paths[idx]);
+    } else {
+      printf("%-10s %s\n", size_str, argv[idx+1]);
+    }
   }
 
   if (argc == 1) {
@@ -166,6 +241,10 @@ int main(int argc, char *argv[]){
     }
     free(stdin_paths);
   }
+
+  free(stack);
+  free(thread_ids);
+  free(total_per_argument);
 
   return 0;
 }
