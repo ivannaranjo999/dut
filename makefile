@@ -2,7 +2,7 @@ CC = gcc
 CFLAGS = -Wall -Wextra -O2
 LDFLAGS = -pthread
 
-SRCS = main.c stack.c size.c worker.c progress.c
+SRCS = main.c stack.c size.c worker.c progress.c args.c
 OBJS = $(SRCS:.c=.o)
 TARGET = dut
 

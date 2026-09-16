@@ -8,41 +8,19 @@
 #include "size.h"
 #include "worker.h"
 #include "progress.h"
+#include "args.h"
 
 int main(int argc, char *argv[]){
   long n_cores = sysconf(_SC_NPROCESSORS_ONLN);
-  int n_dirs = argc - 1;
-  char **stdin_paths = NULL;
 
-  if (argc == 1) {
-    int capacity = 16;
-    int count = 0;
-    stdin_paths = malloc(capacity * sizeof(char*));
-    char buf[PATH_MAX];
+  parse_args(argc, argv);
 
-    while (scanf("%1023s", buf) == 1) {
-      if (count == capacity) {
-        capacity *= 2;
-        stdin_paths = realloc(stdin_paths, capacity * sizeof(char*));
-      }
-      stdin_paths[count++] = strdup(buf);
-    }
+  total_per_argument = calloc(given_paths_size, sizeof(long));
 
-    n_dirs = count;
-  } else {
-    n_dirs = argc - 1;
-  }
-
-  total_per_argument = calloc(n_dirs, sizeof(long));
-
-  for (int idx = 0; idx < n_dirs; ++idx){
+  for (int idx = 0; idx < given_paths_size; ++idx){
     struct stack_entry entry;
     entry.index = idx;
-    if (argc == 1){
-      entry.path = strdup(stdin_paths[idx]);
-    } else {
-      entry.path = strdup(argv[idx + 1]);
-    }
+    entry.path = strdup(given_paths[idx]);
     push_stack(entry);
   }
 
@@ -62,23 +40,14 @@ int main(int argc, char *argv[]){
   progress_signal_done();
   pthread_join(progress_thread, NULL);
 
-  for (int idx = 0; idx < n_dirs; ++idx){
+  for (int idx = 0; idx < given_paths_size; ++idx){
     char size_str[32];
     format_size(total_per_argument[idx], size_str, sizeof(size_str));
+    printf("%-10s %s\n", size_str, given_paths[idx]);
 
-    if (argc == 1){
-      printf("%-10s %s\n", size_str, stdin_paths[idx]);
-    } else {
-      printf("%-10s %s\n", size_str, argv[idx + 1]);
-    }
+    free(given_paths[idx]);
   }
-
-  if (argc == 1) {
-    for (int i = 0; i < n_dirs; ++i) {
-      free(stdin_paths[i]);
-    }
-    free(stdin_paths);
-  }
+  free(given_paths);
 
   stack_free_all();
   free(total_per_argument);
