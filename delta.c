@@ -9,6 +9,9 @@
 #include "size.h"
 
 #define NUM_OF_LINES 2
+#define MAX_SNAPSHOT_LINES 3
+
+static void trim_delta_file(const char *filename, int max_lines);
 
 void create_dot_dut_dir(){
   char dut_dir[PATH_MAX];
@@ -71,6 +74,8 @@ char * write_delta_file(int index, time_t ts){
 
   fprintf(f, "%ld %ld\n", (signed long)ts, total_per_argument[index]);
   fclose(f);
+
+  trim_delta_file(hash_filename, MAX_SNAPSHOT_LINES);
 
   return hash_filename;
 }
@@ -164,6 +169,26 @@ void free_lines(char **lines, int n){
   if (!lines) return;
   for (int i = 0; i < n; ++i) free(lines[i]);
   free(lines);
+}
+
+static void trim_delta_file(const char *filename, int max_lines){
+  FILE *f = fopen(filename, "r");
+  if (!f) return;
+
+  int count = 0;
+  char **lines = extract_last_N_lines(f, max_lines, &count);
+  fclose(f);
+  if (!lines) return;
+
+  FILE *out = fopen(filename, "w");
+  if (out) {
+    for (int i = max_lines - count; i < max_lines; ++i){
+      fprintf(out, "%s\n", lines[i]);
+    }
+    fclose(out);
+  }
+
+  free_lines(lines, max_lines);
 }
 
 int print_delta(int index, time_t ts, long * diff){
