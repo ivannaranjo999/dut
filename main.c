@@ -68,7 +68,7 @@ int main(int argc, char *argv[]){
 
   char size_str[32];
   format_size(total, size_str, sizeof(size_str));
-  printf("Total: %-10s\n", size_str);
+  fprintf(stderr,"Total: %-10s\n", size_str);
 
   stack_free_all();
   free(total_per_argument);
