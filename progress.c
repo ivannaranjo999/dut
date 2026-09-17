@@ -10,6 +10,7 @@ _Atomic int work_finished = 0;
 
 void* progress_main(void *param){
   (void)param;
+  int wrote = 0;
 
   if (!isatty(fileno(stderr))){
     return NULL;
@@ -25,13 +26,14 @@ void* progress_main(void *param){
     pthread_cond_timedwait(&progress_cond, &mutex, &ts);
 
     if (!work_finished){
+      wrote = 1;
       fprintf(stderr, "\r%ld files analyzed...", files_done);
       fflush(stderr);
     }
   }
   pthread_mutex_unlock(&mutex);
 
-  fprintf(stderr, "\r");
+  if (wrote) fprintf(stderr, "\n");
   fflush(stderr);
   return NULL;
 }
