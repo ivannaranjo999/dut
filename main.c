@@ -44,18 +44,31 @@ int main(int argc, char *argv[]){
 
   time_t ts = time(NULL);
 
+  long total = 0;
   for (int idx = 0; idx < given_paths_size; ++idx){
-    char size_str[32];
-    format_size(total_per_argument[idx], size_str, sizeof(size_str));
-    printf("%-10s %s\n", size_str, given_paths[idx]);
 
+    int delta_ret = 0;
+    long delta_diff = 0;
     if(is_delta){
-      write_delta_file(idx, ts);
+      delta_ret = print_delta(idx, ts, &delta_diff);
+      if (delta_ret == 0) total += delta_diff;
+      else total += total_per_argument[idx];
+    } else {
+      total += total_per_argument[idx];
     }
-
+    
+    if (!is_delta || (is_delta && (delta_ret == -1))) {
+      char size_str[32];
+      format_size(total_per_argument[idx], size_str, sizeof(size_str));
+      printf("%-10s %s\n", size_str, given_paths[idx]);
+    }
     free(given_paths[idx]);
   }
   free(given_paths);
+
+  char size_str[32];
+  format_size(total, size_str, sizeof(size_str));
+  printf("Total: %-10s\n", size_str);
 
   stack_free_all();
   free(total_per_argument);

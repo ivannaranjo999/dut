@@ -80,13 +80,17 @@ long get_size(struct stack_entry entry){
 
 void format_size(long kb_size, char *out, size_t out_size){
   const char *units[] = {"K", "M", "G", "T", "P"};
-  double human_size = (double)kb_size;
-  int unit = 0;
+  double abs_size = (double)kb_size;
+  int negative = kb_size < 0;
+  if (negative) abs_size = -abs_size;
 
-  while (human_size >= 1024 && unit < 4){
-    human_size /= 1024;
+  int unit = 0;
+  while (abs_size >= 1024 && unit < 4){
+    abs_size /= 1024;
     unit++;
   }
+
+  double human_size = negative ? -abs_size : abs_size;
 
   if (human_size == (long)human_size){
     snprintf(out, out_size, "%ld%s", (long)human_size, units[unit]);

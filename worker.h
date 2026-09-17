@@ -4,6 +4,8 @@
 /* Size per argument given to dut */
 extern long *total_per_argument;
 
-void* worker_main(void *param);
+extern int given_paths_size;
+
+void* worker_main();
 
 #endif

@@ -4,6 +4,6 @@
 extern char **given_paths;
 extern long *total_per_argument;
 
-void write_delta_file(int index, time_t ts);
+int print_delta(int index, time_t ts, long * diff);
 
 #endif
