@@ -47,22 +47,21 @@ void detect_argument(int length, char *arguments[]){
 }
 
 void parse_args(int argc, char *argv[]){
-  char **arguments = NULL;
-  int count = 0;
-  if (argc == 1) {
-    arguments = extract_args_from_stdin(&count);
-  } else {
-    count = argc - 1;
-    arguments = argv + 1;
-  }
+  char **cli_args = (argc > 1) ? argv + 1 : NULL;
+  int cli_count = (argc > 1) ? argc - 1 : 0;
 
-  given_paths = malloc(count * sizeof(char *));
-  detect_argument(count, arguments);
+  given_paths = malloc(sizeof(char *) * (cli_count > 0 ? cli_count : 1));
+  detect_argument(cli_count, cli_args);
 
-  if (argc == 1){
+  if (given_paths_size == 0 && !isatty(fileno(stdin))) {
+    int count = 0;
+    char **stdin_paths = extract_args_from_stdin(&count);
+
+    given_paths = realloc(given_paths, sizeof(char *) * (given_paths_size + count));
     for (int i = 0; i < count; ++i){
-      free(arguments[i]);
+      given_paths[given_paths_size++] = stdin_paths[i];
     }
-    free(arguments);
+    free(stdin_paths);
   }
+
 }
