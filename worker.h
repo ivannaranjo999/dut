@@ -6,6 +6,6 @@ extern long *total_per_argument;
 
 extern int given_paths_size;
 
-void* worker_main();
+void* worker_main(void * param);
 
 #endif

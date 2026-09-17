@@ -10,7 +10,8 @@
 
 long *total_per_argument;
 
-void* worker_main(){
+void* worker_main(void * param){
+  (void)param;
   long *local_totals = calloc(given_paths_size, sizeof(long));
 
   struct stack_entry entry;
